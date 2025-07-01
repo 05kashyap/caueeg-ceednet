@@ -230,8 +230,8 @@ def load_caueeg_task_split(
 
 
 def calculate_signal_statistics(train_loader, preprocess_train=None, repeats=5, verbose=False):
-    signal_means = torch.zeros((1,))
-    signal_stds = torch.zeros((1,))
+    signal_means_sum = None
+    signal_stds_sum = None
     n_count = 0
 
     for r in range(repeats):
@@ -240,18 +240,26 @@ def calculate_signal_statistics(train_loader, preprocess_train=None, repeats=5, 
                 preprocess_train(sample)
 
             signal = sample["signal"]
+            batch_size = signal.shape[0]
+            
+            # Calculate mean and std for each sample in the batch
             std, mean = torch.std_mean(signal, dim=-1, keepdim=True)  # [N, C, L] or [N, (2)C, F, T]
 
-            if r == 0 and i == 0:
-                signal_means = torch.zeros_like(mean)
-                signal_stds = torch.zeros_like(std)
+            # Initialize accumulation tensors with the correct channel/feature dimensions
+            if signal_means_sum is None:
+                # Use the shape without the batch dimension
+                accumulation_shape = mean.shape[1:]  # Remove batch dimension
+                signal_means_sum = torch.zeros(accumulation_shape, device=mean.device, dtype=mean.dtype)
+                signal_stds_sum = torch.zeros(accumulation_shape, device=std.device, dtype=std.dtype)
 
-            signal_means += mean
-            signal_stds += std
-            n_count += 1
+            # Sum across the batch dimension
+            signal_means_sum += torch.sum(mean, dim=0)  # Sum across batch dimension
+            signal_stds_sum += torch.sum(std, dim=0)    # Sum across batch dimension
+            n_count += batch_size
 
-    signal_mean = torch.mean(signal_means / n_count, dim=0, keepdim=True)  # [N, C, L] or [N, (2)C, F, T]
-    signal_std = torch.mean(signal_stds / n_count, dim=0, keepdim=True)
+    # Calculate final mean and std
+    signal_mean = (signal_means_sum / n_count).unsqueeze(0)  # Add back batch dimension for compatibility
+    signal_std = (signal_stds_sum / n_count).unsqueeze(0)
 
     if verbose:
         print("Mean and standard deviation for signal:")
@@ -264,24 +272,28 @@ def calculate_signal_statistics(train_loader, preprocess_train=None, repeats=5, 
 
 
 def calculate_age_statistics(train_loader, verbose=False):
-    age_means = torch.zeros((1,))
-    age_stds = torch.zeros((1,))
+    age_sum = 0.0
+    age_squared_sum = 0.0
     n_count = 0
 
     for i, sample in enumerate(train_loader):
         age = sample["age"]
-        std, mean = torch.std_mean(age, dim=-1, keepdim=True)
+        batch_size = age.shape[0]
+        
+        # Accumulate sum and squared sum
+        age_sum += torch.sum(age).item()
+        age_squared_sum += torch.sum(age ** 2).item()
+        n_count += batch_size
 
-        if i == 0:
-            age_means = torch.zeros_like(mean)
-            age_stds = torch.zeros_like(std)
-
-        age_means += mean
-        age_stds += std
-        n_count += 1
-
-    age_mean = torch.mean(age_means / n_count, dim=0, keepdim=True)
-    age_std = torch.mean(age_stds / n_count, dim=0, keepdim=True)
+    # Calculate mean and std
+    age_mean = age_sum / n_count
+    age_variance = (age_squared_sum / n_count) - (age_mean ** 2)
+    age_std = math.sqrt(max(age_variance, 1e-8))  # Ensure positive variance
+    
+    # Convert to tensors with scalar shape for proper broadcasting
+    # The normalization expects scalar tensors that can broadcast
+    age_mean = torch.tensor(age_mean, dtype=torch.float32)
+    age_std = torch.tensor(age_std, dtype=torch.float32)
 
     if verbose:
         print("Age mean and standard deviation:")

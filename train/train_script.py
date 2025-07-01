@@ -49,7 +49,7 @@ def learning_rate_search(
             iterations=config["total_samples"],
             warmup_steps=config["total_samples"],
         )
-        amp_scaler = torch.cuda.amp.GradScaler() if config.get("mixed_precision", False) else None
+        amp_scaler = torch.amp.GradScaler('cuda') if config.get("mixed_precision", False) else None
 
         tr_ms = train_multistep if config.get("mixup", 0) < 1e-12 else train_mixup_multistep
         loss, _ = tr_ms(
@@ -153,7 +153,7 @@ def train_script(
     config["base_lr"] = config["base_lr"] * config.get("search_multiplier", 1.0)
     config["iterations"] = round(config["total_samples"] / config["minibatch"] / config.get("ddp_size", 1))
     config["warmup_steps"] = max(round(config["iterations"] * config["warmup_ratio"]), config["warmup_min"])
-    history_interval = max(config["iterations"] // config["num_history"], 1)
+    history_interval = 1#max(config["iterations"] // config["num_history"], 1)
 
     # generate the trainers
     optimizer = optim.AdamW(model.parameters(), lr=config["base_lr"], weight_decay=config["weight_decay"])
@@ -163,7 +163,7 @@ def train_script(
         iterations=config["iterations"],
         warmup_steps=config["warmup_steps"],
     )
-    amp_scaler = torch.cuda.amp.GradScaler() if config.get("mixed_precision", False) else None
+    amp_scaler = torch.amp.GradScaler('cuda') if config.get("mixed_precision", False) else None
 
     # local variable for training loop
     i_step = 0

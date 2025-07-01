@@ -7,6 +7,7 @@ from .resnet_2d import BasicBlock2D, Bottleneck2D
 from .resnet_2d import ResNet2D
 from .cnn_transformer import CNNTransformer
 from .vit import vit_b_16, vit_b_32, vit_l_16, vit_l_32, VisionTransformer
+from .advanced_eeg_transformer import AdvancedEEGTransformer, create_advanced_eeg_transformer
 from .linear_classifier import LinearClassifier, LinearClassifier2D
 from .simple_cnn_2d import IeracitanoCNN
 from .utils import count_parameters

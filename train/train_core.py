@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.cuda.amp import autocast
+from torch.amp import autocast
 
 # from .utils import TimeElapsed
 
@@ -28,9 +28,12 @@ def train_multistep(model, loader, preprocess, optimizer, scheduler, amp_scaler,
             y = sample_batched["class_label"]
 
             # mixed precision training if needed
-            with autocast(enabled=config.get("mixed_precision", False)):
+            with autocast('cuda', enabled=config.get("mixed_precision", False)):
                 # forward pass
-                output = model(x, age)
+                if hasattr(model, 'use_age') and model.use_age == "no":
+                    output = model(x)  # Don't pass age if not used
+                else:
+                    output = model(x, age)  # Pass age for backward compatibility
 
                 # loss function
                 if config["criterion"] == "cross-entropy":
@@ -110,9 +113,12 @@ def train_mixup_multistep(model, loader, preprocess, optimizer, scheduler, amp_s
             age = lam * age1 + (1.0 - lam) * age2
 
             # mixed precision training if needed
-            with autocast(enabled=config.get("mixed_precision", False)):
+            with autocast('cuda', enabled=config.get("mixed_precision", False)):
                 # forward pass
-                output = model(x, age)
+                if hasattr(model, 'use_age') and model.use_age == "no":
+                    output = model(x)  # Don't pass age if not used
+                else:
+                    output = model(x, age)  # Pass age for backward compatibility
 
                 # loss function
                 if config["criterion"] == "cross-entropy":

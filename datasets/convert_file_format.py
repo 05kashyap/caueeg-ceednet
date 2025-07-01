@@ -11,7 +11,7 @@ from tqdm.auto import tqdm
 from pipeline import trim_trailing_zeros
 
 if __name__ == "__main__":
-    signal_root = os.path.join(Path(__file__).parents[1].absolute(), "local/dataset/caueeg-dataset/signal")
+    signal_root = os.path.join(Path(__file__).parents[1].absolute(), "local/datasets/caueeg-dataset/signal")
 
     os.makedirs(os.path.join(signal_root, "feather"), exist_ok=True)
 

@@ -6,22 +6,6 @@ import torch.nn.functional as F
 
 
 @torch.no_grad()
-def compute_embedding(model, sample_batched, preprocess, config):
-    # evaluation mode
-    model.eval()
-
-    # preprocessing (this includes to-device operation)
-    preprocess(sample_batched)
-
-    # apply model on whole batch directly on device
-    x = sample_batched["signal"]
-    age = sample_batched["age"]
-    output = model.compute_feature_embedding(x, age, target_from_last=1)
-
-    return output
-
-
-@torch.no_grad()
 def estimate_score(model, sample_batched, preprocess, config):
     # evaluation mode
     model.eval()
@@ -32,7 +16,12 @@ def estimate_score(model, sample_batched, preprocess, config):
     # apply model on whole batch directly on device
     x = sample_batched["signal"]
     age = sample_batched["age"]
-    output = model(x, age)
+    
+    # Check if model uses age
+    if hasattr(model, 'use_age') and model.use_age == "no":
+        output = model(x)  # Don't pass age if not used
+    else:
+        output = model(x, age)  # Pass age for backward compatibility
 
     if config["criterion"] == "cross-entropy":
         score = F.softmax(output, dim=1)
@@ -273,3 +262,24 @@ def check_accuracy_multicrop_extended(model, loader, preprocess, config, repeat=
     throughput = total / total_time
 
     return accuracy, score, target, confusion_matrix, throughput
+
+
+@torch.no_grad()
+def compute_embedding(model, sample_batched, preprocess, config):
+    # evaluation mode
+    model.eval()
+
+    # preprocessing (this includes to-device operation)
+    preprocess(sample_batched)
+
+    # apply model on whole batch directly on device
+    x = sample_batched["signal"]
+    age = sample_batched["age"]
+    
+    # Check if model uses age
+    if hasattr(model, 'use_age') and model.use_age == "no":
+        output = model.compute_feature_embedding(x, target_from_last=1)
+    else:
+        output = model.compute_feature_embedding(x, age, target_from_last=1)
+
+    return output
