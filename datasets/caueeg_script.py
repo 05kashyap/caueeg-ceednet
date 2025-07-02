@@ -4,8 +4,10 @@ import pprint
 import math
 import torch
 from torchvision import transforms
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from torch.utils.data.distributed import DistributedSampler
+from sklearn.utils.class_weight import compute_class_weight
+import numpy as np
 
 from .caueeg_dataset import CauEegDataset
 from .pipeline import EegRandomCrop
@@ -530,6 +532,66 @@ def compose_preprocess(config, train_loader, verbose=True):
     return preprocess_train, preprocess_test
 
 
+def calculate_class_weights(train_dataset, verbose=False):
+    """Calculate class weights for imbalanced dataset handling."""
+    # Collect all class labels
+    class_labels = []
+    for i in range(len(train_dataset)):
+        sample = train_dataset[i]
+        class_labels.append(sample['class_label'])
+    
+    class_labels = np.array(class_labels)
+    unique_classes = np.unique(class_labels)
+    
+    # Calculate class weights using sklearn
+    class_weights = compute_class_weight(
+        'balanced',
+        classes=unique_classes,
+        y=class_labels
+    )
+    
+    # Convert to tensor
+    class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
+    
+    if verbose:
+        print("Class distribution:")
+        for i, cls in enumerate(unique_classes):
+            count = np.sum(class_labels == cls)
+            print(f"  Class {cls}: {count} samples ({count/len(class_labels)*100:.2f}%)")
+        print(f"Class weights: {class_weights}")
+        print("\n" + "-" * 100 + "\n")
+    
+    return class_weights_tensor, class_labels
+
+
+def create_weighted_sampler(class_labels, verbose=False):
+    """Create weighted random sampler for balanced training."""
+    # Calculate weights for each sample
+    unique_classes, class_counts = np.unique(class_labels, return_counts=True)
+    
+    # Weight is inverse of class frequency
+    class_weights = len(class_labels) / (len(unique_classes) * class_counts)
+    
+    # Create sample weights
+    sample_weights = np.zeros(len(class_labels))
+    for i, cls in enumerate(unique_classes):
+        sample_weights[class_labels == cls] = class_weights[i]
+    
+    sample_weights = torch.tensor(sample_weights, dtype=torch.float32)
+    
+    if verbose:
+        print("Weighted sampler statistics:")
+        for i, cls in enumerate(unique_classes):
+            print(f"  Class {cls}: weight = {class_weights[i]:.4f}")
+        print("\n" + "-" * 100 + "\n")
+    
+    return WeightedRandomSampler(
+        weights=sample_weights,
+        num_samples=len(sample_weights),
+        replacement=True
+    )
+
+
 def make_dataloader(config, train_dataset, val_dataset, test_dataset, multicrop_test_dataset, verbose=False):
     if config["device"] == "cpu":
         num_workers = 0
@@ -554,12 +616,34 @@ def make_dataloader(config, train_dataset, val_dataset, test_dataset, multicrop_
         )
     config["multi_batch_size"] = round(multi_batch_size)
 
-    if config.get("ddp", False):
-        train_sampler = DistributedSampler(train_dataset, shuffle=True)
-        val_sampler = DistributedSampler(val_dataset)
+    # Calculate class weights and create weighted sampler if requested
+    train_sampler = None
+    val_sampler = None
+    
+    if config.get("use_weighted_sampling", False):
+        if config.get("ddp", False):
+            # For DDP, we need to handle weighted sampling differently
+            class_weights_tensor, class_labels = calculate_class_weights(train_dataset, verbose=verbose)
+            config["class_weights"] = class_weights_tensor
+            train_sampler = DistributedSampler(train_dataset, shuffle=True)
+            val_sampler = DistributedSampler(val_dataset)
+            if verbose:
+                print("Warning: Weighted sampling not fully supported with DDP. Using class weights instead.")
+        else:
+            # Calculate class weights for loss function
+            class_weights_tensor, class_labels = calculate_class_weights(train_dataset, verbose=verbose)
+            config["class_weights"] = class_weights_tensor
+            
+            # Create weighted sampler
+            train_sampler = create_weighted_sampler(class_labels, verbose=verbose)
     else:
-        train_sampler = None
-        val_sampler = None
+        # Calculate class weights anyway for potential use in loss functions
+        class_weights_tensor, _ = calculate_class_weights(train_dataset, verbose=verbose)
+        config["class_weights"] = class_weights_tensor
+        
+        if config.get("ddp", False):
+            train_sampler = DistributedSampler(train_dataset, shuffle=True)
+            val_sampler = DistributedSampler(val_dataset)
 
     if config.get("run_mode", None) == "train":
         train_loader = DataLoader(

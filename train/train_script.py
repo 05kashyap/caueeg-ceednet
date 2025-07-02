@@ -156,7 +156,7 @@ def train_script(
     history_interval = 1#max(config["iterations"] // config["num_history"], 1)
 
     # generate the trainers
-    optimizer = optim.AdamW(model.parameters(), lr=config["base_lr"], weight_decay=config["weight_decay"])
+    optimizer = optim.Adam(model.parameters(), lr=config["base_lr"], weight_decay=config["weight_decay"])
     scheduler = get_lr_scheduler(
         optimizer,
         config["lr_scheduler_type"],

@@ -85,9 +85,17 @@ def parse_args():
     
     # Loss function
     parser.add_argument("--criterion", type=str, default="cross-entropy",
-                       choices=["cross-entropy", "multi-bce", "svm"],
+                       choices=["cross-entropy", "weighted-cross-entropy", "focal", "multi-bce", "weighted-multi-bce", "svm"],
                        help="Loss criterion")
     
+    # Class imbalance handling
+    parser.add_argument("--use_weighted_sampling", action="store_true", default=False,
+                       help="Use weighted random sampling for balanced training")
+    parser.add_argument("--focal_alpha", type=float, default=1.0,
+                       help="Alpha parameter for focal loss")
+    parser.add_argument("--focal_gamma", type=float, default=2.0,
+                       help="Gamma parameter for focal loss")
+
     # Mixed precision training
     parser.add_argument("--mixed_precision", action="store_true", default=True,
                        help="Use mixed precision training")

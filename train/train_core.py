@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.amp import autocast
+from .losses import compute_loss_with_criterion
 
 # from .utils import TimeElapsed
 
@@ -35,19 +36,18 @@ def train_multistep(model, loader, preprocess, optimizer, scheduler, amp_scaler,
                 else:
                     output = model(x, age)  # Pass age for backward compatibility
 
-                # loss function
-                if config["criterion"] == "cross-entropy":
-                    s = F.log_softmax(output, dim=1)
-                    loss = F.nll_loss(s, y)
-                elif config["criterion"] == "multi-bce":
-                    y_oh = F.one_hot(y, num_classes=output.size(dim=1))
-                    s = torch.sigmoid(output)
-                    loss = F.binary_cross_entropy_with_logits(output, y_oh.float())
-                elif config["criterion"] == "svm":
-                    s = output
-                    loss = F.multi_margin_loss(output, y)
-                else:
-                    raise ValueError("config['criterion'] must be set to one of ['cross-entropy', 'multi-bce', 'svm']")
+                # Get class weights if available
+                class_weights = config.get("class_weights", None)
+                if class_weights is not None:
+                    class_weights = class_weights.to(output.device)
+
+                # Compute loss using the new loss function system
+                loss, s = compute_loss_with_criterion(
+                    output, y, config["criterion"], 
+                    class_weights=class_weights,
+                    focal_alpha=config.get("focal_alpha", 1.0),
+                    focal_gamma=config.get("focal_gamma", 2.0)
+                )
 
             # backward and update
             if config.get("mixed_precision", False):
@@ -120,25 +120,27 @@ def train_mixup_multistep(model, loader, preprocess, optimizer, scheduler, amp_s
                 else:
                     output = model(x, age)  # Pass age for backward compatibility
 
-                # loss function
-                if config["criterion"] == "cross-entropy":
-                    s = F.log_softmax(output, dim=1)
-                    loss1 = F.nll_loss(s, y1)
-                    loss2 = F.nll_loss(s, y2)
-                    loss = lam * loss1 + (1 - lam) * loss2
-                elif config["criterion"] == "multi-bce":
-                    y1_oh = F.one_hot(y1, num_classes=output.size(dim=1))
-                    y2_oh = F.one_hot(y2, num_classes=output.size(dim=1))
-                    y_oh = lam * y1_oh + (1.0 - lam) * y2_oh
-                    s = torch.sigmoid(output)
-                    loss = F.binary_cross_entropy_with_logits(output, y_oh)
-                elif config["criterion"] == "svm":
-                    s = output
-                    loss1 = F.multi_margin_loss(output, y1)
-                    loss2 = F.multi_margin_loss(output, y2)
-                    loss = lam * loss1 + (1 - lam) * loss2
-                else:
-                    raise ValueError("config['criterion'] must be set to one of ['cross-entropy', 'multi-bce', 'svm']")
+                # Get class weights if available
+                class_weights = config.get("class_weights", None)
+                if class_weights is not None:
+                    class_weights = class_weights.to(output.device)
+
+                # Compute mixup loss using the new loss function system
+                loss1, s1 = compute_loss_with_criterion(
+                    output, y1, config["criterion"], 
+                    class_weights=class_weights,
+                    focal_alpha=config.get("focal_alpha", 1.0),
+                    focal_gamma=config.get("focal_gamma", 2.0)
+                )
+                loss2, s2 = compute_loss_with_criterion(
+                    output, y2, config["criterion"], 
+                    class_weights=class_weights,
+                    focal_alpha=config.get("focal_alpha", 1.0),
+                    focal_gamma=config.get("focal_gamma", 2.0)
+                )
+                
+                loss = lam * loss1 + (1 - lam) * loss2
+                s = s1  # Use s1 for prediction accuracy (could also interpolate)
 
             # backward and update
             if config.get("mixed_precision", False):
